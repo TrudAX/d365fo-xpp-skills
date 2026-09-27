@@ -1,0 +1,15 @@
+{
+  "name": "trudax-d365fo",
+  "description": "Claude plugins for Dynamics 365 Finance and Operations (D365FO) X++ development",
+  "owner": {
+    "name": "Denis Trunin",
+    "url": "https://github.com/TrudAX"
+  },
+  "plugins": [
+    {
+      "name": "d365fo-xpp",
+      "source": "./plugins/d365fo-xpp",
+      "description": "Add changed X++ elements to the Visual Studio project, compile the project with xppc, and analyse the compile errors."
+    }
+  ]
+}

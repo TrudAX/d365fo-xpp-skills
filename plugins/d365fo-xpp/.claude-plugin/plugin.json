@@ -1,0 +1,14 @@
+{
+  "name": "d365fo-xpp",
+  "displayName": "D365FO X++ Development",
+  "version": "0.1.0",
+  "description": "Skills for Dynamics 365 Finance and Operations X++ development: add changed AOT elements to the Visual Studio project, compile the project with xppc, and analyse the compile errors.",
+  "author": {
+    "name": "Denis Trunin",
+    "url": "https://github.com/TrudAX"
+  },
+  "homepage": "https://github.com/TrudAX/d365fo-xpp-skills",
+  "repository": "https://github.com/TrudAX/d365fo-xpp-skills",
+  "license": "MIT",
+  "keywords": ["dynamics-365", "d365fo", "finance-and-operations", "x++", "xpp", "erp"]
+}
