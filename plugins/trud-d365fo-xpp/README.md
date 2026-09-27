@@ -33,6 +33,17 @@ Everything runs locally. The scripts make no network connections.
 
 The skill doesn't deploy, sync the database, or restart services. To run or test a change, you still build it in Visual Studio.
 
+## Privacy
+
+This plugin collects no data. Its scripts run only on your machine. They make no network connections, send no telemetry, and send nothing to the plugin author or to any other service.
+
+- **What the scripts read:** your D365FO source files, Visual Studio project files, and compiler logs.
+- **What stays on your machine:** the compile output and logs in `%TEMP%\xppc-scratch`, which you can delete at any time.
+- **What Claude sees:** the script output Claude reads in your conversation (file paths, element names, and compiler messages). Claude handles it under your own Claude plan's terms, like anything else in the conversation.
+- **Personal data:** the plugin doesn't read, store, or process any.
+
+Questions: open an issue at https://github.com/TrudAX/d365fo-xpp-skills/issues.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

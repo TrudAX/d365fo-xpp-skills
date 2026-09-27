@@ -10,5 +10,6 @@
   "homepage": "https://github.com/TrudAX/d365fo-xpp-skills",
   "repository": "https://github.com/TrudAX/d365fo-xpp-skills",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/TrudAX/d365fo-xpp-skills/blob/main/plugins/trud-d365fo-xpp/README.md#privacy",
   "keywords": ["dynamics-365", "d365fo", "finance-and-operations", "x++", "xpp", "erp"]
 }
