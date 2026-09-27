@@ -77,7 +77,9 @@ $FolderBySubType = @{
 function Get-VsFolder([string]$Type, [string]$File) {
     if ($Type -eq 'AxEdt' -or $Type -eq 'AxQuery') {
         [xml]$x = [System.IO.File]::ReadAllText($File)
-        $sub = $x.DocumentElement.GetAttribute('type', 'http://www.w3.org/2001/XMLSchema-instance')
+        # Root element carries i:type="AxEdtString" etc.; match the attribute by local name.
+        $sub = ''
+        foreach ($a in $x.DocumentElement.Attributes) { if ($a.LocalName -eq 'type') { $sub = $a.Value } }
         if ($FolderBySubType.ContainsKey($sub)) { return $FolderBySubType[$sub] }
         if ($Type -eq 'AxEdt') { return 'Extended Data Types' }
         return 'Queries'
@@ -93,7 +95,7 @@ function New-XppProjectFiles([string]$ProjectFile, [string]$ModelName) {
     $solutionDir = Split-Path $projDir
     $guid = [guid]::NewGuid()
     $targets = 'Microsoft.Dynamics.Framework.Tools.BuildTasks.17.0.targets'
-    $targetsDir = Join-Path ${env:ProgramFiles(x86)} 'MSBuild\Microsoft\Dynamics\AX'
+    $targetsDir = Join-Path ([System.Environment]::GetFolderPath('ProgramFilesX86')) 'MSBuild\Microsoft\Dynamics\AX'
     if (Test-Path -LiteralPath $targetsDir) {
         $found = Get-ChildItem -LiteralPath $targetsDir -Filter 'Microsoft.Dynamics.Framework.Tools.BuildTasks.*.targets' |
             Sort-Object { [version]($_.Name -replace '^Microsoft\.Dynamics\.Framework\.Tools\.BuildTasks\.(.+)\.targets$', '$1') } |

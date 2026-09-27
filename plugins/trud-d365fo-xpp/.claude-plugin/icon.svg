@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="X++">
+  <rect width="256" height="256" rx="48" fill="#1B3A5C"/>
+  <rect x="24" y="24" width="208" height="208" rx="32" fill="none" stroke="#4A90C8" stroke-width="6"/>
+  <text x="128" y="152" text-anchor="middle" font-family="Consolas, 'Courier New', monospace" font-size="84" font-weight="700" fill="#FFFFFF">X++</text>
+</svg>
