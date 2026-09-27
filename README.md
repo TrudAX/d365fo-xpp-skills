@@ -30,6 +30,7 @@ plugins/trud-d365fo-xpp/                  the plugin
   skills/d365-xpp-compile/SKILL.md        skill instructions
   skills/d365-xpp-compile/scripts/        PowerShell scripts the skill runs
   skills/d365-xpp-compile/references/     compile error reference
+notes/                                    general notes, not part of the plugin
 ```
 
 ## Adding skills

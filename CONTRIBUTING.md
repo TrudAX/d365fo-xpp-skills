@@ -15,9 +15,12 @@ plugins/trud-d365fo-xpp/                        the plugin folder: the only part
   skills/<skill-name>/scripts/                  scripts the skill tells Claude to run (optional)
   skills/<skill-name>/references/               extra docs Claude reads on demand (optional)
 README.md, CONTRIBUTING.md, CLAUDE.md, LICENSE  repo docs (not installed)
+notes/                                          general notes (not installed, not reviewed, still public)
 ```
 
 Everything a skill uses must be inside `plugins/trud-d365fo-xpp/`. Only that folder is installed.
+
+`notes/` holds general notes that aren't part of the plugin. Commits that change only `notes/` or other files outside the plugin folder don't create a directory version or a review. Never reference `notes/` from the plugin, and follow the rules in [notes/README.md](notes/README.md): the repo is public.
 
 ## Checklist for a new skill
 

@@ -7,3 +7,4 @@
 - Never copy client names, project paths, ticket numbers, or other client code or data into this repo, even when the skill was developed on a client project. Rewrite examples with neutral names first.
 - Before committing, check that the repo-local `git config user.email` is the owner's GitHub no-reply address, not a work email.
 - Run both `claude plugin validate` commands before every push.
+- `notes/` is general, public material outside the plugin. Edit it freely, but never reference it from the plugin, and never put client data there (see notes/README.md). A commit that touches only `notes/` needs no version bump.
