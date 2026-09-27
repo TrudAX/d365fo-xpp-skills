@@ -102,14 +102,16 @@ function New-XppProjectFiles([string]$ProjectFile, [string]$ModelName) {
             Select-Object -Last 1
         if ($found) { $targets = $found.Name }
     }
-    $rnrproj = @"
+    # Template placeholders: {NS} is the MSBuild namespace, {P} opens an MSBuild property reference,
+    # {MODEL}, {NAME}, {GUID} and {TARGETS} are filled in from the arguments.
+    $template = @'
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="{NS}">
   <PropertyGroup>
-    <Configuration Condition=" '`$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '`$(Platform)' == '' ">AnyCPU</Platform>
-    <BuildTasksDirectory Condition=" '`$(BuildTasksDirectory)' == ''">`$(MSBuildProgramFiles32)\MSBuild\Microsoft\Dynamics\AX</BuildTasksDirectory>
-    <Model>$ModelName</Model>
+    <Configuration Condition=" '{P}Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '{P}Platform)' == '' ">AnyCPU</Platform>
+    <BuildTasksDirectory Condition=" '{P}BuildTasksDirectory)' == ''">{P}MSBuildProgramFiles32)\MSBuild\Microsoft\Dynamics\AX</BuildTasksDirectory>
+    <Model>{MODEL}</Model>
     <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
     <OutputPath>bin</OutputPath>
     <SchemaVersion>2.0</SchemaVersion>
@@ -117,11 +119,11 @@ function New-XppProjectFiles([string]$ProjectFile, [string]$ModelName) {
     <RunAppCheckerRules>False</RunAppCheckerRules>
     <LogAppcheckerDiagsAsErrors>False</LogAppcheckerDiagsAsErrors>
     <DeployOnline>False</DeployOnline>
-    <ProjectGuid>{$($guid.ToString())}</ProjectGuid>
-    <Name>$name</Name>
-    <RootNamespace>$name</RootNamespace>
+    <ProjectGuid>{GUID}</ProjectGuid>
+    <Name>{NAME}</Name>
+    <RootNamespace>{NAME}</RootNamespace>
   </PropertyGroup>
-  <PropertyGroup Condition="'`$(Configuration)|`$(Platform)' == 'Debug|AnyCPU'">
+  <PropertyGroup Condition="'{P}Configuration)|{P}Platform)' == 'Debug|AnyCPU'">
     <Configuration>Debug</Configuration>
     <DBSyncInBuild>False</DBSyncInBuild>
     <GenerateFormAdaptors>False</GenerateFormAdaptors>
@@ -132,14 +134,16 @@ function New-XppProjectFiles([string]$ProjectFile, [string]$ModelName) {
     <DataEntityExpandParentChildRelations>False</DataEntityExpandParentChildRelations>
     <DataEntityUseLabelTextAsFieldName>False</DataEntityUseLabelTextAsFieldName>
   </PropertyGroup>
-  <PropertyGroup Condition=" '`$(Configuration)' == 'Debug' ">
+  <PropertyGroup Condition=" '{P}Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
-  <Import Project="`$(MSBuildBinPath)\Microsoft.Common.targets" />
-  <Import Project="`$(BuildTasksDirectory)\$targets" />
+  <Import Project="{P}MSBuildBinPath)\Microsoft.Common.targets" />
+  <Import Project="{P}BuildTasksDirectory)\{TARGETS}" />
 </Project>
-"@
+'@
+    $rnrproj = $template.Replace('{NS}', $script:MsBuildNs).Replace('{P}', [string][char]36 + '(').Replace('{MODEL}', $ModelName).
+        Replace('{NAME}', $name).Replace('{GUID}', '{' + $guid.ToString() + '}').Replace('{TARGETS}', $targets)
     $rnrproj = ($rnrproj -replace "`r`n", "`n") -replace "`n", "`r`n"
     New-Item -ItemType Directory -Force -Path $projDir | Out-Null
     [System.IO.File]::WriteAllText($ProjectFile, $rnrproj.TrimEnd(), $script:Utf8NoBom)
