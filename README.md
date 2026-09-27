@@ -15,7 +15,7 @@ A Claude plugin marketplace for Microsoft Dynamics 365 Finance and Operations (D
 
 The skill then runs automatically after X++ changes. You can also invoke it directly as `/trud-d365fo-xpp:d365-xpp-compile`.
 
-To get new versions, run `/plugin marketplace update trudax-d365fo`.
+To get new versions, run `/plugin marketplace update trudax-d365fo`, then update the plugin from `/plugin`. From a terminal, run `claude plugin marketplace update trudax-d365fo`, then `claude plugin update trud-d365fo-xpp@trudax-d365fo`.
 
 ## Requirements
 
@@ -32,7 +32,9 @@ plugins/trud-d365fo-xpp/                  the plugin
   skills/d365-xpp-compile/references/     compile error reference
 ```
 
-To add a skill, create `plugins/trud-d365fo-xpp/skills/<skill-name>/SKILL.md` and raise `version` in `plugin.json`. Check the plugin with `claude plugin validate ./plugins/trud-d365fo-xpp` and the marketplace with `claude plugin validate .`.
+## Adding skills
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). It covers the skill folder and `SKILL.md` template, rules for scripts (including what trips the Claude directory's security scan), keeping client details out of this public repo, which READMEs to update, the version bump, validation, and how a push becomes a new directory version. [CLAUDE.md](CLAUDE.md) points Claude Code sessions in this repo at the same rules.
 
 ## License
 
