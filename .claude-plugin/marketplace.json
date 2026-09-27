@@ -7,8 +7,8 @@
   },
   "plugins": [
     {
-      "name": "d365fo-xpp",
-      "source": "./plugins/d365fo-xpp",
+      "name": "trud-d365fo-xpp",
+      "source": "./plugins/trud-d365fo-xpp",
       "description": "Add changed X++ elements to the Visual Studio project, compile the project with xppc, and analyse the compile errors."
     }
   ]

@@ -1,4 +1,4 @@
-# D365FO X++ Development (`d365fo-xpp`)
+# D365FO X++ Development (`trud-d365fo-xpp`)
 
 Skills that help Claude develop in X++ for Microsoft Dynamics 365 Finance and Operations (D365FO) on a standard development VM.
 

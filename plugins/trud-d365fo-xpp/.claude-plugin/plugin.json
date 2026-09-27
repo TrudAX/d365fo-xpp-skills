@@ -1,5 +1,5 @@
 {
-  "name": "d365fo-xpp",
+  "name": "trud-d365fo-xpp",
   "displayName": "D365FO X++ Development",
   "version": "0.1.0",
   "description": "Skills for Dynamics 365 Finance and Operations X++ development: add changed AOT elements to the Visual Studio project, compile the project with xppc, and analyse the compile errors.",
