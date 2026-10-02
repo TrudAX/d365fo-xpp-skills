@@ -1,0 +1,8 @@
+{
+  "tenant": "<your-entra-tenant-id>",
+  "client_id": "<your-app-client-id>",
+  "resource": "https://<your-environment>.operations.dynamics.com",
+  "upstream": "https://<your-environment>.operations.dynamics.com/mcp",
+  "listen_host": "127.0.0.1",
+  "listen_port": 8899
+}
