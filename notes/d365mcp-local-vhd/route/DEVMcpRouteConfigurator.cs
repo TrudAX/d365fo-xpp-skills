@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net.Http;
@@ -22,7 +23,6 @@ using System.Web.Http;
 using System.Web.Http.Dispatcher;
 using System.Web.Http.Routing;
 using Microsoft.Dynamics.AX.Framework.Services.Platform.Mcp;
-using Microsoft.Dynamics.AX.Framework.Services.Platform.McpServer;
 using Microsoft.Dynamics.ApplicationPlatform.RestApi;
 using Microsoft.Dynamics.Platform.Integration.Common.SessionManagement;
 using Microsoft.Dynamics.Platform.Integration.Common.Throttling;
@@ -36,43 +36,57 @@ namespace DEV.McpRoute
         public void Configure(HttpConfiguration config)
         {
             // Never let this add-in break the AOS startup: log and skip on any error.
+            // Keep platform-dependent type references out of this wrapper so its catch is active
+            // before ConfigureCore is JIT-compiled; missing platform types can fail during compilation.
             try
             {
-                // The AOS gives each configurator a WebApiAssembliesResolver that only returns the OData
-                // assemblies and the DLLs in bin\Controllers, so McpServerController (bin\...Services.Platform.dll)
-                // would not be found. This configuration only serves /mcp, so resolve controllers from that assembly.
-                Type controllerType = typeof(McpServerController);
-                config.Services.Replace(typeof(IAssembliesResolver), new McpAssembliesResolver(controllerType.Assembly));
-
-                HttpMessageHandler handler = HttpClientFactory.CreatePipeline(
-                    new HttpControllerDispatcher(config),
-                    new DelegatingHandler[]
-                    {
-                        new FailureLogHandler(),
-                        new AxServicesThrottlingHandler(new McpServerThrottlingManager()),
-                        new EnsureServicesRequestSessionHandler()
-                    });
-
-                config.Routes.MapHttpRoute(
-                    "DEVTerminateMcpSession",
-                    "mcp",
-                    new { controller = "McpServer", action = "TerminateSession" },
-                    new { httpMethod = new HttpMethodConstraint(HttpMethod.Delete) },
-                    handler);
-
-                config.Routes.MapHttpRoute(
-                    "DEVMcpServer",
-                    "mcp",
-                    new { controller = "McpServer", action = "HandleMcpRequestAsync" },
-                    null,
-                    handler);
-
-                Log("Mapped /mcp to " + controllerType.FullName);
+                ConfigureCore(config);
             }
             catch (Exception ex)
             {
                 Log("Failed to map /mcp: " + ex);
             }
+        }
+
+        // NoInlining preserves the JIT boundary: dependency failures here are caught by Configure.
+        // This cannot protect failures during assembly loading or MEF discovery before Configure runs.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void ConfigureCore(HttpConfiguration config)
+        {
+            // The AOS gives each configurator a WebApiAssembliesResolver that only returns the OData
+            // assemblies and the DLLs in bin\Controllers, so McpServerController (bin\...Services.Platform.dll)
+            // would not be found. This configuration only serves /mcp, so resolve controllers from that assembly.
+            Assembly platformAssembly = typeof(McpServerThrottlingManager).Assembly;
+            Type controllerType = platformAssembly.GetType(
+                "Microsoft.Dynamics.AX.Framework.Services.Platform.Mcp.McpServerController", false)
+                ?? platformAssembly.GetType(
+                    "Microsoft.Dynamics.AX.Framework.Services.Platform.McpServer.McpServerController", true);
+            config.Services.Replace(typeof(IAssembliesResolver), new McpAssembliesResolver(controllerType.Assembly));
+
+            HttpMessageHandler handler = HttpClientFactory.CreatePipeline(
+                new HttpControllerDispatcher(config),
+                new DelegatingHandler[]
+                {
+                    new FailureLogHandler(),
+                    new AxServicesThrottlingHandler(new McpServerThrottlingManager()),
+                    new EnsureServicesRequestSessionHandler()
+                });
+
+            config.Routes.MapHttpRoute(
+                "DEVTerminateMcpSession",
+                "mcp",
+                new { controller = "McpServer", action = "TerminateSession" },
+                new { httpMethod = new HttpMethodConstraint(HttpMethod.Delete) },
+                handler);
+
+            config.Routes.MapHttpRoute(
+                "DEVMcpServer",
+                "mcp",
+                new { controller = "McpServer", action = "HandleMcpRequestAsync" },
+                null,
+                handler);
+
+            Log("Mapped /mcp to " + controllerType.FullName);
         }
 
         // Logs /mcp responses with status >= 400 (IIS replaces their bodies outside <location path="mcp">).

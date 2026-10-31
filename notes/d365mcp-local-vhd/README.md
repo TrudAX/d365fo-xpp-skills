@@ -111,8 +111,10 @@ Entra ID.
    ```
 
 3. **Deploy.** This stops IIS for a few seconds, copies `DEVMcpRoute.dll` to `webroot\bin\Controllers`, adds the
-   `web.config` mapping (a backup is kept as `web.config.DEVMcpBridge.bak`), creates the performance counters
-   and starts IIS:
+  `web.config` mapping, creates the performance counters and starts IIS. Before changing deployed files,
+  it backs up the current `web.config` and route DLL (if present) under
+  `webroot\DEVMcpRoute-backups\<timestamp>-<unique-id>`. The original one-time
+  `web.config.DEVMcpBridge.bak` is also retained:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File C:\Temp\d365mcp-local-vhd\route\build.ps1 -Deploy
@@ -123,8 +125,28 @@ Entra ID.
    run it in an elevated terminal. Don't look for a way around the refusal.
 
 4. **Verify.** Open the AOS once (the first request after an IIS restart is slow), then run `build.ps1 -Status`.
-   Every line should say `True`, and the route log should contain
-   `Mapped /mcp to ...McpServerController`.
+  The boolean checks should say `True`, and a new route log entry should contain
+  `Mapped /mcp to ...McpServerController`. Then use the signed-in browser to run `tools/list` (section 5).
+  `Has MCP server` identifies an installed controller; it does not prove that a previously deployed route
+  DLL is compatible or that AOS startup succeeds.
+
+### Repair after upgrading to 10.0.50
+
+In 10.0.50 the controller moved from
+`Microsoft.Dynamics.AX.Framework.Services.Platform.McpServer.McpServerController` to
+`Microsoft.Dynamics.AX.Framework.Services.Platform.Mcp.McpServerController`. A route DLL compiled against
+the old namespace can fail during AOS startup, causing HTTP 500 even on the frontend. The old script's
+`Has MCP server : True` checked only the short name and did not detect this incompatibility.
+
+Use the updated route source and build script together, then run `build.ps1 -Deploy` in an elevated
+PowerShell. It compiles against the installed platform before stopping IIS, backs up the current configuration
+and deployed DLL, replaces the add-in and restarts IIS. The updated route resolves the exact controller type
+inside its guarded startup path, preferring the new namespace and falling back to the old one. `-Status`
+now reports the installed controller's full name.
+
+Verify that the frontend loads, that a fresh log entry names `Platform.Mcp.McpServerController`, and that
+`tools/list` succeeds. Do not restore the old DLL onto 10.0.50: that restores the startup failure. If the
+updated add-in must be disabled, use `build.ps1 -Remove`; the deployment backups remain available.
 
 ## 5. Using it from Claude
 

@@ -9,7 +9,8 @@ Enables the D365 ERP MCP server (/mcp) on an IIS-hosted AOS (onebox / VHD or clo
   -Webroot <path>      AOS webroot (default: the first of C:, J:, K:\AOSService\webroot that has an AOS)
 
 -Deploy and -Remove need an elevated PowerShell. A one-time backup of web.config is kept as
-web.config.DEVMcpBridge.bak. A platform update replaces the webroot, so run -Deploy again after updates.
+web.config.DEVMcpBridge.bak. Each deployment also backs up the current web.config and route DLL under
+webroot\DEVMcpRoute-backups. A platform update replaces the webroot, so run -Deploy again after updates.
 #>
 param([switch]$Deploy, [switch]$Remove, [switch]$Status, [string]$Webroot)
 
@@ -53,6 +54,40 @@ function Assert-Admin {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'Run this from an elevated PowerShell (it stops IIS and changes web.config).'
     }
+}
+
+function Get-McpControllerName {
+    $resolver = [ResolveEventHandler] {
+        param($sender, $eventArgs)
+        $dependency = Join-Path $bin "$(([Reflection.AssemblyName]::new($eventArgs.Name)).Name).dll"
+        if (Test-Path $dependency) { return [Reflection.Assembly]::LoadFrom($dependency) }
+        return $null
+    }
+    [AppDomain]::CurrentDomain.add_AssemblyResolve($resolver)
+    try {
+        $assembly = [Reflection.Assembly]::LoadFrom($platformDll)
+        foreach ($name in @(
+            'Microsoft.Dynamics.AX.Framework.Services.Platform.Mcp.McpServerController',
+            'Microsoft.Dynamics.AX.Framework.Services.Platform.McpServer.McpServerController'
+        )) {
+            $controller = $assembly.GetType($name, $false)
+            if ($controller) { return $controller.FullName }
+        }
+        return $null
+    }
+    finally {
+        [AppDomain]::CurrentDomain.remove_AssemblyResolve($resolver)
+    }
+}
+
+function Backup-McpDeployment {
+    $backup = Join-Path $Webroot ('DEVMcpRoute-backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $backup | Out-Null
+    Copy-Item $webConfig (Join-Path $backup 'web.config') -ErrorAction Stop
+    if (Test-Path $target) {
+        Copy-Item $target (Join-Path $backup 'DEVMcpRoute.dll') -ErrorAction Stop
+    }
+    "Deployment backup      : $backup"
 }
 
 # IIS only hands URL prefixes that have a TransferRequestHandler mapping (data, api, metadata...) to managed
@@ -110,13 +145,15 @@ function Install-McpPerfCounters {
 if ($Status) {
     $log = Find-RouteLog
     $version = (Get-Item $platformDll).VersionInfo.FileVersion
-    $hasServer = Select-String -Path $platformDll -Pattern 'McpServerController' -SimpleMatch -Quiet
+    $controllerName = Get-McpControllerName
+    $hasServer = $null -ne $controllerName
     $mapping = Select-String -Path $webConfig -Pattern ('name="' + $handlerName + '"') -SimpleMatch -Quiet
     $counters = [Diagnostics.PerformanceCounterCategory]::Exists($counterCategory)
     $logPath = if ($log) { $log.FullName } else { '(none yet)' }
     "AOS webroot            : $Webroot"
     "Platform version       : $version"
     "Has MCP server         : $hasServer"
+    "MCP controller type    : $(if ($controllerName) { $controllerName } else { '(not found)' })"
     "Route DLL deployed     : $(Test-Path $target)"
     "web.config mapping     : $mapping"
     "Performance counters   : $counters"
@@ -126,9 +163,11 @@ if ($Status) {
 }
 
 if (-not $Remove) {
-    if (-not (Select-String -Path $platformDll -Pattern 'McpServerController' -SimpleMatch -Quiet)) {
-        throw "This platform version has no MCP server (McpServerController not found in $platformDll)."
+    $controllerName = Get-McpControllerName
+    if (-not $controllerName) {
+        throw "This platform version has no supported MCP controller (neither Platform.Mcp.McpServerController nor Platform.McpServer.McpServerController was found in $platformDll)."
     }
+    "Building for controller: $controllerName"
     New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
     $refs = @(
         "$fx\mscorlib.dll", "$fx\System.dll", "$fx\System.Core.dll", "$fx\System.Net.Http.dll",
@@ -152,6 +191,7 @@ if ($Deploy) {
     Assert-Admin
     iisreset /stop
     try {
+        Backup-McpDeployment
         Copy-Item $out $target -Force
         Set-McpHandler $true
         Install-McpPerfCounters
