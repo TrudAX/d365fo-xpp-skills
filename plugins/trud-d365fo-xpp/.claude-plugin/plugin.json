@@ -1,8 +1,8 @@
 {
   "name": "trud-d365fo-xpp",
   "displayName": "D365FO X++ Development",
-  "version": "0.3.1",
-  "description": "Skills for Dynamics 365 Finance and Operations X++ development: add changed AOT elements to the Visual Studio project, compile the project with xppc, analyse the compile errors, find where elements are used and their extension classes from the cross-reference database, and link a Trace Parser trace to the X++ code that wrote each value.",
+  "version": "0.4.0",
+  "description": "Skills for Dynamics 365 Finance and Operations X++ development: create tables, fields, forms, RunBase classes and extensions with consistent conventions and check forms against their patterns, add changed AOT elements to the Visual Studio project, compile the project with xppc, analyse the compile errors, find where elements are used and their extension classes from the cross-reference database, and link a Trace Parser trace to the X++ code that wrote each value.",
   "author": {
     "name": "Denis Trunin",
     "url": "https://github.com/TrudAX"

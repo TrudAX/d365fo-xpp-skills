@@ -9,7 +9,7 @@
     {
       "name": "trud-d365fo-xpp",
       "source": "./plugins/trud-d365fo-xpp",
-      "description": "Add changed X++ elements to the Visual Studio project, compile the project with xppc, analyse the compile errors, find element references and extension classes in the cross-reference database, and analyse Trace Parser traces against the X++ code."
+      "description": "Create X++ tables, fields, forms, RunBase classes and extensions with consistent conventions, add changed X++ elements to the Visual Studio project, compile the project with xppc, analyse the compile errors, find element references and extension classes in the cross-reference database, and analyse Trace Parser traces against the X++ code."
     }
   ]
 }

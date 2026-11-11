@@ -58,6 +58,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'XppCommon.ps1')
+. (Join-Path $PSScriptRoot 'XppMetadataCheck.ps1')
 
 # ---------------------------------------------------------------- source line mapping
 # xppc reports class/table lines in Visual Studio's combined code view: the declaration without its
@@ -129,7 +130,13 @@ Write-Output "Output  : $OutputDir (scratch; deployed bin untouched)"
 
 # ---------------------------------------------------------------- pre-checks
 $blocking = 0
+$ignoredCount = 0
 $preNotes = New-Object System.Collections.Generic.List[string]
+$metadataCheck = $true
+try { Initialize-XppMetadataCheck $pld } catch {
+    $metadataCheck = $false
+    $preNotes.Add("  [note]    ignored-XML check skipped: $($_.Exception.Message)")
+}
 $projectNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($item in $proj.Items) {
     [void]$projectNames.Add($item.Name)
@@ -143,6 +150,12 @@ foreach ($item in $proj.Items) {
     if ($check.XmlError) {
         $preNotes.Add("  [xml]     $($item.Include): malformed XML - $($check.XmlError)")
         $blocking++
+    }
+    elseif ($metadataCheck) {
+        foreach ($issue in (Test-XppMetadataXml $file)) {
+            $preNotes.Add("  [ignored] $($item.Include): $issue")
+            $ignoredCount++
+        }
     }
     if ($check.FormatIssues.Count -gt 0) {
         $preNotes.Add("  [format]  $($item.Include): $($check.FormatIssues -join ', ') (fix: Add-XppProjectItem.ps1 normalizes)")
@@ -378,16 +391,28 @@ if (-not $Full) {
     else { $summary += '; incremental - only elements changed since the last build in this folder were recompiled' }
 }
 if ($missingLabels -gt 0) { $summary += "; $missingLabels label problem(s), see [label] under Checks" }
+if ($ignoredCount -gt 0) { $summary += "; $ignoredCount XML element(s) the metadata reader ignores, see [ignored] under Checks" }
 if ($errors.Count -gt 0) {
     Write-Output "RESULT: FAILED - $summary"
     exit 1
 }
 if ($p.ExitCode -ne 0) {
-    Write-Output "RESULT: FAILED - xppc exit code $($p.ExitCode) without error diagnostics. xppc output:"
-    Write-Output $consoleText.Trim()
+    # Fatal errors (for example an invalid token in a class source) are only in the text log.
+    $fatal = @()
+    if (Test-Path -LiteralPath $logFile) { $fatal = @(Select-String -LiteralPath $logFile -Pattern 'Fatal Error' | ForEach-Object { $_.Line.Trim() } | Select-Object -Unique) }
+    if ($fatal.Count -gt 0) {
+        Write-Output "FATAL ERRORS ($($fatal.Count))"
+        $fatal | ForEach-Object { Write-Output "  $_" }
+        Write-Output ''
+        Write-Output "RESULT: FAILED - xppc exit code $($p.ExitCode), $($fatal.Count) fatal error(s)"
+    }
+    else {
+        Write-Output "RESULT: FAILED - xppc exit code $($p.ExitCode) without error diagnostics. xppc output:"
+        Write-Output $consoleText.Trim()
+    }
     exit 1
 }
-if ($missingLabels -gt 0) {
+if ($missingLabels -gt 0 -or $ignoredCount -gt 0) {
     Write-Output "RESULT: FAILED - $summary"
     exit 1
 }

@@ -1,11 +1,11 @@
 ---
 name: d365-xpp-compile
-description: Compile a Dynamics 365 Finance & Operations (D365 F&O, AX7) X++ Visual Studio project (.rnrproj) from the command line with xppc and analyse the compile errors. Use this every time you create or modify X++ / AOT elements (AxClass, AxTable, AxForm, table/form/class extensions, EDTs, enums, menu items, data entities, security, labels) - add the changed elements to the task's .rnrproj project, compile, and fix errors until the build is clean, without waiting to be asked. Also use when the user says "build/compile the project", "check that it compiles", "run xppc", or pastes X++ compiler errors.
+description: Set up the task's Visual Studio project and git branch, then compile a Dynamics 365 Finance & Operations (D365 F&O, AX7) X++ project (.rnrproj) from the command line with xppc and analyse the compile errors. Use this at the start of every task that will create or modify X++ / AOT elements (AxClass, AxTable, AxForm, table/form/class extensions, EDTs, enums, menu items, data entities, security, labels), before the first edit - to create or find the task's project and branch - and after the changes - add the changed elements to the project, compile, and fix errors until the build is clean, without waiting to be asked. Also use when the user says "build/compile the project", "check that it compiles", "run xppc", or pastes X++ compiler errors.
 ---
 
 # D365 X++ project compile
 
-After every X++ change: **add the changed elements to the project → compile the project → analyse and fix → repeat until clean → full compile before handing back.**
+Before the first edit: **the task's project and git branch.** After every X++ change: **add the changed elements to the project → compile the project → analyse and fix → repeat until clean → full compile before handing back.**
 
 ## How "compile the project" works here
 
@@ -44,17 +44,33 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<skill-dir>/scripts/Inv
 | `... -AllWarnings` | Also lists warnings outside the project. |
 | `... -CheckLabels` | Also checks that referenced labels exist and that label IDs are unique. Off by default. |
 
+`XppCommon.ps1` is shared: `d365-xpp-conventions\scripts\Invoke-XppFormPattern.ps1` dot-sources it for `Find-PackagesDir`.
+
 The packages folder (`<drive>:\AosService\PackagesLocalDirectory`) is found automatically. Override it with `-PackagesDir` or `$env:D365_PACKAGES_DIR`.
 
 Give compile calls a long tool timeout (600000 ms). If a full compile of a very large package might take longer than that, run it in the background and wait for it to finish.
 
+## Task setup: project and branch (before the first edit)
+
+Every task that creates or changes X++ elements gets its own Visual Studio project and, when the code is in git, its own branch, set up before the first edit. Questions and investigations that change nothing need neither.
+
+**Names** come from the project rules: CLAUDE.md first, otherwise the pattern of the existing projects (the repo's `Projects\` folder) and branches (`git branch -a`). Usually the ticket number plus a short description, e.g. project `ABC123_SalesRelease` and branch `feature/ABC123-sales-release`. If the rules need a ticket number and you don't have one, ask.
+
+1. **Project.**
+   - Use the one the user or CLAUDE.md names, or the task's existing project (Glob for `**/*ABC123*.rnrproj`).
+   - Otherwise create it with `Add-XppProjectItem.ps1 -Create` in the folder where the sibling projects are, with the model the elements live in (the `<package>\<model>\Ax...` folder of the element files).
+   - One project per task: don't add this task's elements to another task's project.
+2. **Git branch** - only if the model folder is in a git repository (`git -C <model folder> rev-parse --show-toplevel`).
+   - Already on this task's branch: stay on it.
+   - Otherwise, if `git status` is clean, create the task branch from the default branch (the one the rules name, else `origin/HEAD`, else `main`/`master`; `git fetch` first when there is a remote) and switch to it.
+   - **Uncommitted changes: don't switch.** They may belong to another task. Stop and ask the user what to do with them.
+   - Say which branch you created and switched to. The model folders are what Visual Studio and the AOS read (often linked into `PackagesLocalDirectory`), so switching changes their code, and Visual Studio may ask to reload.
+   - Project rules win: some repositories commit straight to the main branch, others use TFVC; then skip this step.
+   - Never commit, push or open a pull request unless the user asks.
+
 ## The loop
 
-1. **Find the project.**
-   - Use the one the user or CLAUDE.md names.
-   - Otherwise, look for the ticket number under the repo's `Projects\` folder (for example, a Glob for `**/*ABC123*.rnrproj`).
-   - If none exists, create one with `-Create`. Follow the naming of sibling projects (such as `ABC123_SalesRelease`) and use the model the elements live in: the `<package>\<model>\Ax...` folder of the element files.
-   - If the name is a real judgement call, ask the user.
+1. **Use the task's project** (see [Task setup](#task-setup-project-and-branch-before-the-first-edit)). If the name is a real judgement call, ask the user.
 2. **Add every element you created or modified.** Include new menu items, enum extensions, labels (`AxLabelFile`), and security objects, not just classes. Don't add elements you only read.
    - Run `Add-XppProjectItem.ps1` after editing element files even when the element is already in the project. The Write tool saves LF line endings; the script restores the VS format so the git diff stays clean.
 3. **Compile** with `Invoke-XppProjectBuild.ps1` (incremental is fine while iterating).
@@ -70,6 +86,8 @@ Give compile calls a long tool timeout (600000 ms). If a full compile of a very 
 Checks  :
   [format]  AxClass\ABCFoo: LF line endings ...   -> run Add-XppProjectItem.ps1 on it
   [missing] / [xml] ...                           -> blocking; the compile is skipped until fixed
+  [ignored] AxTable\ABCFoo: AxTable[ABCFoo]/CreatedBy: out of order, must come before Relations
+                                                  -> the element compiles WITHOUT this property; fix the XML
   [cache]   stale compiler cache ...              -> rerun with -RemoveStaleCache
 ERRORS (2; 1 in project elements)
   1. [project] Class ABCFoo, run, line 12 col 9  (NotDeclared)
@@ -80,6 +98,8 @@ ERRORS (2; 1 in project elements)
 RESULT: FAILED - ...
 ```
 
+- **`[ignored]`** lists XML elements that Visual Studio and xppc silently skip when they read the element file: an unknown property name, a wrong XML namespace (a menu item root without `xmlns="Microsoft.Dynamics.AX.Metadata.V1"` is read as completely empty), or a property out of order. The compiler never reports these, so the result is FAILED until you move, rename or re-namespace the element as the message says. Copy the order from a standard element of the same type.
+- **`FATAL ERRORS`** come from the text log (for example an invalid character in a class source) and stop the compile of that element.
 - **`[project]` errors** are in your elements. Fix them.
 - **`[other]` errors** are in elements outside the project. In a full build right after your change, they are almost always callers or subclasses you broke. Fix the caller, or reconsider the change.
   - If the error is unrelated to your change (the element isn't in your diff and doesn't use anything you changed), it existed before. Tell the user about it; don't rewrite unrelated code.
