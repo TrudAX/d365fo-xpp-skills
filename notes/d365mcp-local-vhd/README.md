@@ -81,7 +81,8 @@ Entra ID.
 - A onebox / VHD or a cloud-hosted Tier1 (CHE) with the AOS in IIS. `build.ps1` finds the webroot in
   `C:`, `J:` or `K:\AOSService\webroot`; pass `-Webroot` otherwise. Tested on platform `7.0.8199.55`
   (ApplicationSuite `10.40.3825`) on a onebox and on platform `7.0.7996.33` on a CHE (see the flights note in
-  section 2). `build.ps1` stops with a clear message if the platform has no MCP server.
+  section 2), and on 10.0.48 and 10.0.50 VHDs (see *Repair after upgrading to 10.0.50* in section 4).
+  `build.ps1` stops with a clear message if the platform has no MCP server.
 - Feature management: **Dynamics 365 ERP Model Context Protocol server** enabled (it is by default). If it is
   off, `/mcp` returns 403.
 - An elevated PowerShell. The script uses Visual Studio's C# compiler (found with `vswhere`) or falls back to
@@ -111,10 +112,10 @@ Entra ID.
    ```
 
 3. **Deploy.** This stops IIS for a few seconds, copies `DEVMcpRoute.dll` to `webroot\bin\Controllers`, adds the
-  `web.config` mapping, creates the performance counters and starts IIS. Before changing deployed files,
-  it backs up the current `web.config` and route DLL (if present) under
-  `webroot\DEVMcpRoute-backups\<timestamp>-<unique-id>`. The original one-time
-  `web.config.DEVMcpBridge.bak` is also retained:
+   `web.config` mapping, creates the performance counters and starts IIS. Before it changes anything, it copies
+   the current `web.config` and route DLL (if present) to `DEVMcpRoute-backups\<timestamp>-<unique-id>` next to
+   the webroot (`C:\AOSService\DEVMcpRoute-backups` on a onebox), outside the folder IIS serves. The one-time
+   `web.config.DEVMcpBridge.bak` in the webroot is also kept:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File C:\Temp\d365mcp-local-vhd\route\build.ps1 -Deploy
@@ -125,10 +126,10 @@ Entra ID.
    run it in an elevated terminal. Don't look for a way around the refusal.
 
 4. **Verify.** Open the AOS once (the first request after an IIS restart is slow), then run `build.ps1 -Status`.
-  The boolean checks should say `True`, and a new route log entry should contain
-  `Mapped /mcp to ...McpServerController`. Then use the signed-in browser to run `tools/list` (section 5).
-  `Has MCP server` identifies an installed controller; it does not prove that a previously deployed route
-  DLL is compatible or that AOS startup succeeds.
+   The boolean checks should say `True`, and a new route log entry should contain
+   `Mapped /mcp to ...McpServerController`. Then use the signed-in browser to run `tools/list` (section 5).
+   `Has MCP server` identifies an installed controller; it does not prove that a previously deployed route
+   DLL is compatible or that AOS startup succeeds.
 
 ### Repair after upgrading to 10.0.50
 
@@ -146,7 +147,7 @@ now reports the installed controller's full name.
 
 Verify that the frontend loads, that a fresh log entry names `Platform.Mcp.McpServerController`, and that
 `tools/list` succeeds. Do not restore the old DLL onto 10.0.50: that restores the startup failure. If the
-updated add-in must be disabled, use `build.ps1 -Remove`; the deployment backups remain available.
+updated add-in must be disabled, use `build.ps1 -Remove`; the deployment backups in `DEVMcpRoute-backups` stay.
 
 ## 5. Using it from Claude
 
@@ -308,6 +309,7 @@ response with status >= 400, including the real error text, to `DEVMcpRoute.log`
 | A call never returns within 45 s | First OData model build after an AOS restart: use `__mcp.start` / `__mcp.wait` |
 | "MCP session with ID ... could not be found" | The server dropped an idle session: restart the client (proxy), or run calls with `mcp-run.mjs` |
 | Everything stopped working after a platform update, or after `web.config` was replaced (e.g. to point the AOS at another database) | The `DEV-MCP` mapping is gone: run `build.ps1 -Deploy` again |
+| HTTP 500 on every page, the frontend too, after upgrading to 10.0.50 | The deployed route DLL was built for the old `Platform.McpServer` namespace: see *Repair after upgrading to 10.0.50* in section 4 |
 
 ## 9. Uninstall
 
@@ -316,7 +318,8 @@ powershell -ExecutionPolicy Bypass -File C:\Temp\d365mcp-local-vhd\route\build.p
 ```
 
 This deletes the DLL and removes the `web.config` mapping (IIS is stopped and started). The performance
-counter category stays; it is harmless.
+counter category stays; it is harmless. The deployment backups in `DEVMcpRoute-backups` next to the webroot
+stay too; delete that folder when you no longer need them.
 
 ## 10. Notes on scope
 

@@ -9,8 +9,10 @@ Enables the D365 ERP MCP server (/mcp) on an IIS-hosted AOS (onebox / VHD or clo
   -Webroot <path>      AOS webroot (default: the first of C:, J:, K:\AOSService\webroot that has an AOS)
 
 -Deploy and -Remove need an elevated PowerShell. A one-time backup of web.config is kept as
-web.config.DEVMcpBridge.bak. Each deployment also backs up the current web.config and route DLL under
-webroot\DEVMcpRoute-backups. A platform update replaces the webroot, so run -Deploy again after updates.
+web.config.DEVMcpBridge.bak. Each deployment also backs up the current web.config and route DLL to
+DEVMcpRoute-backups next to the webroot (C:\AOSService\DEVMcpRoute-backups on a onebox).
+Run -Deploy again after every platform update: an update can remove the mapping and the DLL, or keep a DLL
+that was built for the old platform.
 #>
 param([switch]$Deploy, [switch]$Remove, [switch]$Status, [string]$Webroot)
 
@@ -80,8 +82,10 @@ function Get-McpControllerName {
     }
 }
 
+# The backups go next to the webroot, not into it: inside the webroot, the copied web.config would become the
+# configuration of a URL path of the AOS site.
 function Backup-McpDeployment {
-    $backup = Join-Path $Webroot ('DEVMcpRoute-backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N'))
+    $backup = Join-Path (Split-Path $Webroot) ('DEVMcpRoute-backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $backup | Out-Null
     Copy-Item $webConfig (Join-Path $backup 'web.config') -ErrorAction Stop
     if (Test-Path $target) {
