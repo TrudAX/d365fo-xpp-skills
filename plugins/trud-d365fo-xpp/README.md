@@ -60,6 +60,9 @@ When Claude creates X++ elements, the skill makes it apply the defaults that the
 - **RunBase classes:** a template with dialog parameters, a query, a caller record or file upload. It runs in batch only when that's asked for or needed.
 - **Names:** extensions (`SalesTable.<Model>`), extension classes (`SalesTable_<Model>_Extension`), menu items and privileges. Existing extensions in the model are reused.
 - **Literal text** in labels and messages, unless you ask for label files.
+- **No trivial comments** in the generated X++ code: a comment explains a reason or a rule, not what the next line does.
+
+Claude asks before it creates a table, field or relation whose design your request leaves open. The skill assumes a development VM where you have full rights. If something fails with a security error (access denied, a permission or policy error), Claude stops and asks instead of working around it.
 
 The project's own conventions (CLAUDE.md, or the existing elements in the model) take precedence. `Invoke-XppFormPattern.ps1` runs the platform's form pattern engine, the code behind the form designer's *Apply pattern*: it prints the controls a pattern requires, and reports or fixes the places where a form doesn't match its pattern. The X++ compiler doesn't check patterns.
 
