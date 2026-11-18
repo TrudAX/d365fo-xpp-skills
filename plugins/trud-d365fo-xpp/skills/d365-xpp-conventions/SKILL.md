@@ -66,7 +66,7 @@ For a periodic job, a dialog operation, a data update or a file import, write a 
 | Form data source / data field / control | `<Form>Form_<DataSource>DS_<Model>_Extension`, `<Form>Form_<DataSource>DS_<Field>_<Model>_Extension`, `<Form>Form_<Control>_<Model>_Extension` |
 | Event handler class | `<Element>_<Model>_EventHandler`, form: `<Form>Form_<Model>_EventHandler` |
 
-Class names are limited to 80 characters; if longer, use the prefix instead of the model name. Extension classes are `final`.
+Class names are limited to 80 characters; if longer, use the prefix instead of the model name. Extension classes are `final`. For the code inside them (Chain of Command, event handlers, form extensions, lookups), use `d365-xpp-extensions`.
 
 ## Menu items and privileges
 

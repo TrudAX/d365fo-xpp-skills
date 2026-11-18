@@ -65,6 +65,20 @@ When Claude creates X++ elements, the skill makes it apply the defaults that the
 
 The project's own conventions (CLAUDE.md, or the existing elements in the model) take precedence. `Invoke-XppFormPattern.ps1` runs the platform's form pattern engine, the code behind the form designer's *Apply pattern*: it prints the controls a pattern requires, and reports or fixes the places where a form doesn't match its pattern. The X++ compiler doesn't check patterns.
 
+### `d365-xpp-extensions`
+
+When Claude writes or reviews an extension of standard code (a Chain of Command wrapper, an event handler, a form, data source or control extension, a lookup, or a field added to a RunBase or SysOperation dialog), the skill gives it the rules that are easy to get wrong from memory, and recipes to copy:
+
+- **Mechanism:** when to use Chain of Command, a pre/post handler, a data event, a delegate or a form event, and what can and can't be wrapped or hooked.
+- **Chain of Command:** the wrapper signature, where `next` may stand, how to stop a standard method, and the members and state of an extension class.
+- **Tables:** when a wrapper or a data event isn't called (set-based statements, `doInsert`), where a field must be assigned to be saved, what `orig()` holds, how to fail a validation, and how a display method of an extension class is bound.
+- **Forms:** what to wrap at which level, the order of events, stopping a save, adding a control at run time, and the arguments of `registerOverrideMethod`.
+- **Lookups:** which technique fits, with recipes for a field lookup, a reference group, a multi-select lookup and a lookup that ignores security policies.
+- **Dialogs:** reacting to a field added to a RunBase dialog, and SysOperation contract and UI builder extensions.
+- **Review:** patterns that compile and are wrong, and a checklist.
+
+The rules were compiled and run on application version 10.0.39, and the skill lists the few that weren't. It takes class names from `d365-xpp-conventions` and builds with `d365-xpp-compile`. It has no scripts of its own, so it runs and changes nothing by itself.
+
 ## Requirements
 
 - A Windows D365FO development environment with `<drive>:\AosService\PackagesLocalDirectory\bin\xppc.exe`: a cloud-hosted (CHE) or local (VHD) development VM, where the AOS runs in IIS on the same machine. The folder is found automatically; override it with `-PackagesDir` or `$env:D365_PACKAGES_DIR`.
