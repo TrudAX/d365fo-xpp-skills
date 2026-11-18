@@ -17,7 +17,7 @@ Defaults for new elements, taken from the TRUDUtils Visual Studio add-in that ge
 - **Security errors: stop and ask.** The skill is for dev VMs with full rights. On access denied or a permission, policy or login error, report it and ask; don't work around it, unless the user or CLAUDE.md says how.
 - **Reuse existing extensions.** Before creating `<Element>.<Model>` or an extension class, look in the model folder for one (`AxTableExtension\SalesTable.*.xml`; a class with `[ExtensionOf(tableStr(SalesTable))]`, or `d365-xpp-xref -ExtensionsOf`) and add to it.
 - **XML:** copy the root element (with its `xmlns` attributes) and the property order from a standard element of the same type. Element order and namespaces matter: forms use `xmlns="Microsoft.Dynamics.AX.Metadata.V6"` and menu items `xmlns="Microsoft.Dynamics.AX.Metadata.V1"` on the root, while tables, EDTs, classes and privileges have none. Anything misplaced is silently ignored; `d365-xpp-compile` reports it as `[ignored]`.
-- **After writing:** add the elements to the project and compile (`d365-xpp-compile`). New or changed tables, fields and indexes also need a database sync; say so.
+- **After writing:** add the elements to the project and build it (`d365-xpp-compile`). The build syncs the project's new or changed tables, views and data entities; a change that needs a wider sync (for example an EDT used by tables outside the project) needs Visual Studio's *Synchronize database*: say so.
 
 ## New table
 

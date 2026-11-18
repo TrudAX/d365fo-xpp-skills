@@ -1,31 +1,48 @@
 <#
 .SYNOPSIS
-    Compiles a D365 F&O X++ Visual Studio project (.rnrproj) from the command line with xppc
-    and prints the diagnostics that matter for that project.
+    Builds a D365 F&O X++ Visual Studio project (.rnrproj) from the command line the way Visual Studio
+    does on a CHE or VHD development VM, and prints the diagnostics that matter for that project.
 
 .DESCRIPTION
     X++ has no per-project compile unit: Visual Studio's "Build project" compiles the whole
-    package (module) that the project's model belongs to, incrementally. This script does the
-    same with xppc.exe, but writes the assemblies to a scratch folder, so the deployed binaries
-    in PackagesLocalDirectory\<Package>\bin (used by the running AOS) are never touched. The
-    scratch folder keeps its own incremental state, so it does not hide changes from the next
-    Visual Studio build. The only shared state xppc updates is the package's gitignored
-    XppMetadata compiler cache, the same one Visual Studio updates.
+    package (module) that the project's model belongs to, incrementally, into the package's bin
+    folder that the AOS runs. This script does the same:
+      1. stops the batch service and IIS (the AOS) if they run - needs an elevated session
+      2. compiles the package with xppc.exe into PackagesLocalDirectory\<Package>\bin
+      3. compiles the package's label files with LabelC.exe when they changed since the last build
+      4. syncs the project's tables, views and data entities (and their extensions) with SyncEngine.exe
+         when their files changed since the last sync (-Sync forces it)
+      5. starts IIS and the batch service again
+    Logs go to %TEMP%\xppc-logs\<module>, the change state to %TEMP%\xppc-state.
+
+    With -CheckOnly it only compiles, into a scratch folder (%TEMP%\xppc-scratch\<module>), and stops,
+    deploys and syncs nothing: the AOS keeps running the deployed binaries.
 
     The report contains:
-      * pre-checks of the project's element files (missing file, malformed XML, BOM/line endings)
+      * pre-checks of the project file and its element files (missing file, malformed XML, BOM/line endings)
       * every compile error in the package, tagged [project] or [other]
       * warnings for project elements only (the rest are counted, or listed with -AllWarnings)
       * for class/table code, the XML file line and source text of each diagnostic
+      * the label compile, DB sync and AOS restart results
 
-    Exit code: 0 = no errors, 1 = compile errors or unusable project files, 2 = setup failure.
+    Exit code: 0 = no errors, 1 = compile, label or sync errors, or unusable project files, 2 = setup failure.
 
 .PARAMETER Project
     The .rnrproj file, or a folder containing exactly one.
 .PARAMETER PackagesDir
     PackagesLocalDirectory. Auto-detected (<drive>:\AosService\PackagesLocalDirectory or $env:D365_PACKAGES_DIR).
+.PARAMETER CheckOnly
+    Compile into a scratch folder only: no AOS restart, no deployment, no labels, no sync.
 .PARAMETER OutputDir
-    Scratch output folder. Default: %TEMP%\xppc-scratch\<module>. Keep it stable so incremental builds stay fast.
+    With -CheckOnly: the scratch output folder. Default: %TEMP%\xppc-scratch\<module>. Keep it stable so
+    incremental builds stay fast.
+.PARAMETER Sync
+    Sync the project's tables, views and data entities even when their files didn't change since the last sync
+    (for example after a database restore).
+.PARAMETER SqlServer
+    SQL Server of the AOS database, for the sync. Default: localhost.
+.PARAMETER SqlDatabase
+    The AOS database, for the sync. Default: AxDB.
 .PARAMETER Full
     Full compile instead of incremental. Use before handing work back, after renames/deletes, or when
     you need every warning of the project elements (incremental only reports recompiled elements).
@@ -42,14 +59,20 @@
     .\Invoke-XppProjectBuild.ps1 -Project C:\Repos\Contoso\Projects\ABC123_Feature\ABC123_Feature\ABC123_Feature.rnrproj
 .EXAMPLE
     .\Invoke-XppProjectBuild.ps1 -Project C:\Repos\Contoso\Projects\ABC123_Feature -Full
+.EXAMPLE
+    .\Invoke-XppProjectBuild.ps1 -Project C:\Repos\Contoso\Projects\ABC123_Feature -CheckOnly
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$Project,
     [string]$PackagesDir,
+    [switch]$CheckOnly,
     [string]$OutputDir,
     [switch]$Full,
+    [switch]$Sync,
+    [string]$SqlServer = 'localhost',
+    [string]$SqlDatabase = 'AxDB',
     [switch]$RemoveStaleCache,
     [switch]$AllWarnings,
     [switch]$CheckLabels,
@@ -59,6 +82,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'XppCommon.ps1')
 . (Join-Path $PSScriptRoot 'XppMetadataCheck.ps1')
+. (Join-Path $PSScriptRoot 'XppDeploy.ps1')
 
 # ---------------------------------------------------------------- source line mapping
 # xppc reports class/table lines in Visual Studio's combined code view: the declaration without its
@@ -113,8 +137,18 @@ try {
     $pld = Find-PackagesDir $PackagesDir
     $info = Get-XppModelInfo $pld $proj.Model
     $xppc = Join-Path $pld 'bin\xppc.exe'
-    if (-not $OutputDir) { $OutputDir = Join-Path ([System.IO.Path]::GetTempPath()) "xppc-scratch\$($info.Module)" }
-    New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+    if ($CheckOnly) {
+        if (-not $OutputDir) { $OutputDir = Join-Path ([System.IO.Path]::GetTempPath()) "xppc-scratch\$($info.Module)" }
+        $logDir = $OutputDir
+    } else {
+        if ($OutputDir) { throw '-OutputDir works only with -CheckOnly: the build writes to the package bin folder.' }
+        if (-not (Test-XppElevated)) {
+            throw 'The build stops and starts IIS and the batch service, which needs an elevated session (run as administrator). Use -CheckOnly to only compile.'
+        }
+        $OutputDir = Join-Path $info.PackageDir 'bin'
+        $logDir = Join-Path ([System.IO.Path]::GetTempPath()) "xppc-logs\$($info.Module)"
+    }
+    New-Item -ItemType Directory -Force -Path $OutputDir, $logDir | Out-Null
 } catch {
     Write-Output "SETUP FAILED: $($_.Exception.Message)"
     exit 2
@@ -126,7 +160,8 @@ Write-Output "=== X++ project build: $($proj.Name) ==="
 Write-Output "Project : $projectFile"
 Write-Output "Model   : $($info.Model) (package folder $(Split-Path $info.PackageDir -Leaf), module $($info.Module)); $($proj.Items.Count) project elements"
 Write-Output "Compiler: $xppc ($mode)"
-Write-Output "Output  : $OutputDir (scratch; deployed bin untouched)"
+if ($CheckOnly) { Write-Output "Output  : $OutputDir (scratch, -CheckOnly: nothing deployed, the AOS keeps running)" }
+else { Write-Output "Output  : $OutputDir (package bin, used by the AOS)" }
 
 # ---------------------------------------------------------------- pre-checks
 $blocking = 0
@@ -136,6 +171,10 @@ $metadataCheck = $true
 try { Initialize-XppMetadataCheck $pld } catch {
     $metadataCheck = $false
     $preNotes.Add("  [note]    ignored-XML check skipped: $($_.Exception.Message)")
+}
+$projectFormat = Test-XppFileFormat $projectFile
+if ($projectFormat.FormatIssues -contains 'LF line endings') {
+    $preNotes.Add("  [format]  project file: LF line endings (fix: Add-XppProjectItem.ps1 normalizes)")
 }
 $projectNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($item in $proj.Items) {
@@ -248,11 +287,13 @@ if ($blocking -gt 0) {
     exit 1
 }
 
-# ---------------------------------------------------------------- compile
-$logFile = Join-Path $OutputDir 'build.log'
-$xmlLog = Join-Path $OutputDir 'build.xml'
-$stdoutFile = Join-Path $OutputDir 'xppc.out.txt'
+# ---------------------------------------------------------------- compile, labels, sync
+$logFile = Join-Path $logDir 'build.log'
+$xmlLog = Join-Path $logDir 'build.xml'
+$stdoutFile = Join-Path $logDir 'xppc.out.txt'
 Remove-Item -LiteralPath $logFile, $xmlLog, $stdoutFile -ErrorAction SilentlyContinue
+# Logs of earlier builds of this script that wrote them into the package bin.
+if (-not $CheckOnly) { Remove-Item -LiteralPath (Join-Path $OutputDir 'build.log'), (Join-Path $OutputDir 'build.xml'), (Join-Path $OutputDir 'xppc.out.txt') -ErrorAction SilentlyContinue }
 
 $xppcArgs = @(
     "-metadata=$pld", "-compilermetadata=$pld", "-modelmodule=$($info.Module)", "-output=$OutputDir",
@@ -262,24 +303,117 @@ $xppcArgs = @(
 if (-not $Full) { $xppcArgs += '-incremental' }
 $firstBuild = -not (Test-Path -LiteralPath (Join-Path $OutputDir "Dynamics.AX.$($info.Module).dll"))
 
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $xppc
-$psi.Arguments = ($xppcArgs | ForEach-Object { '"' + $_ + '"' }) -join ' '
-$psi.WorkingDirectory = Split-Path $xppc
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $true
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-$p = [System.Diagnostics.Process]::Start($psi)
-$stdoutTask = $p.StandardOutput.ReadToEndAsync()
-$stderrTask = $p.StandardError.ReadToEndAsync()
-$p.WaitForExit()
-$sw.Stop()
-$consoleText = $stdoutTask.Result + $stderrTask.Result
-[System.IO.File]::WriteAllText($stdoutFile, $consoleText)
-Write-Output "Compile : $([int]$sw.Elapsed.TotalSeconds) s, xppc exit code $($p.ExitCode); logs $logFile, $xmlLog"
+$aosState = $null
+$deployProblems = New-Object System.Collections.Generic.List[string]
+$deployLines = New-Object System.Collections.Generic.List[string]
+$diagsReady = $false
+try {
+    if (-not $CheckOnly) {
+        $aosState = Stop-XppAos
+        $stopped = @()
+        if ($aosState.Iis) { $stopped += 'IIS' }
+        if ($aosState.Batch) { $stopped += 'batch service' }
+        if ($stopped.Count -gt 0) { Write-Output "AOS     : stopped $($stopped -join ' and ')" }
+        else { Write-Output 'AOS     : IIS and the batch service were not running' }
+    }
 
-if (-not (Test-Path -LiteralPath $xmlLog)) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $xppc
+    $psi.Arguments = ($xppcArgs | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $psi.WorkingDirectory = Split-Path $xppc
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $stdoutTask = $p.StandardOutput.ReadToEndAsync()
+    $stderrTask = $p.StandardError.ReadToEndAsync()
+    $p.WaitForExit()
+    $sw.Stop()
+    $consoleText = $stdoutTask.Result + $stderrTask.Result
+    [System.IO.File]::WriteAllText($stdoutFile, $consoleText)
+    Write-Output "Compile : $([int]$sw.Elapsed.TotalSeconds) s, xppc exit code $($p.ExitCode); logs $logFile, $xmlLog"
+
+    if (Test-Path -LiteralPath $xmlLog) {
+        [xml]$log = [System.IO.File]::ReadAllText($xmlLog)
+        $diagsReady = $true
+        $compiledOk = ($p.ExitCode -eq 0) -and -not @($log.Diagnostics.Items.Diagnostic | Where-Object { $_.Severity -eq 'Error' })
+
+        if (-not $CheckOnly -and $compiledOk) {
+            # Labels: LabelC compiles the package's label files into <Package>\Resources, as Visual Studio does.
+            $labelFiles = Get-XppLabelFiles $info
+            if ($labelFiles.Count -gt 0) {
+                $labelState = Get-XppStateFile $info.Module 'labels'
+                $labelStamps = Get-XppFileStamps $labelFiles
+                $resources = Join-Path $info.PackageDir 'Resources'
+                if ($Full -or -not (Test-Path -LiteralPath $resources) -or (Test-XppFilesChanged $labelState $labelStamps)) {
+                    $labelLog = Join-Path $logDir 'labelc.log'
+                    $labelErr = Join-Path $logDir 'labelc.err'
+                    Remove-Item -LiteralPath $labelErr -ErrorAction SilentlyContinue
+                    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                    $code = Invoke-XppTool (Join-Path $pld 'bin\LabelC.exe') @("-metadata=$pld", "-modelmodule=$($info.Module)",
+                        "-output=$resources", "-outlog=$labelLog", "-errlog=$labelErr") (Join-Path $logDir 'labelc.out.txt')
+                    $sw.Stop()
+                    $errText = ''
+                    if (Test-Path -LiteralPath $labelErr) { $errText = ([System.IO.File]::ReadAllText($labelErr)).Trim() }
+                    if ($code -ne 0 -or $errText) {
+                        $deployLines.Add("Labels  : FAILED (LabelC exit code $code); log $labelErr")
+                        if ($errText) { $deployProblems.Add("label compile: $errText") } else { $deployProblems.Add("label compile: LabelC exit code $code") }
+                    } else {
+                        Save-XppFileStamps $labelState $labelStamps
+                        $deployLines.Add("Labels  : compiled ($([int]$sw.Elapsed.TotalSeconds) s)")
+                    }
+                } else {
+                    $deployLines.Add('Labels  : unchanged, not compiled')
+                }
+            }
+
+            # DB sync: the project's tables, views and data entities, when their files changed since the last sync.
+            $syncSet = Get-XppSyncElements $proj.Items $info
+            if ($syncSet.Names.Count -gt 0) {
+                $syncState = Get-XppStateFile $info.Module 'sync'
+                $syncStamps = Get-XppFileStamps $syncSet.Files
+                if ($Sync -or (Test-XppFilesChanged $syncState $syncStamps)) {
+                    $syncLog = Join-Path $logDir 'syncengine.log'
+                    $connect = "Data Source=$SqlServer;Initial Catalog=$SqlDatabase;Integrated Security=True;Enlist=True;Application Name=SyncEngine"
+                    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                    $code = Invoke-XppTool (Join-Path $pld 'bin\SyncEngine.exe') @('-syncmode=partiallist', "-synclist=$($syncSet.Names -join ',')",
+                        "-metadatabinaries=$pld", "-connect=$connect", '-fallbacktobinaries') $syncLog
+                    $sw.Stop()
+                    if ($code -ne 0) {
+                        $deployLines.Add("Sync    : FAILED (SyncEngine exit code $code) for $($syncSet.Names -join ', '); log $syncLog")
+                        foreach ($l in (Get-XppLogErrors $syncLog)) { $deployProblems.Add("sync: $l") }
+                        if ($deployProblems.Count -eq 0) { $deployProblems.Add("sync: SyncEngine exit code $code") }
+                    } else {
+                        Save-XppFileStamps $syncState $syncStamps
+                        $deployLines.Add("Sync    : $($syncSet.Names -join ', ') ($([int]$sw.Elapsed.TotalSeconds) s)")
+                    }
+                } else {
+                    $deployLines.Add("Sync    : $($syncSet.Names -join ', ') unchanged since the last sync, not synced (-Sync forces it)")
+                }
+            }
+        } elseif (-not $CheckOnly) {
+            $deployLines.Add('Labels  : skipped, the compile failed')
+            $deployLines.Add('Sync    : skipped, the compile failed')
+        }
+    }
+} catch {
+    $buildError = $_.Exception.Message
+} finally {
+    if ($aosState) {
+        foreach ($l in $deployLines) { Write-Output $l }
+        $deployLines.Clear()
+        Write-Output "AOS     : $(Start-XppAos $aosState); the first page load after the restart takes about a minute"
+    }
+}
+foreach ($l in $deployLines) { Write-Output $l }
+
+if ($buildError) {
+    Write-Output ''
+    Write-Output "RESULT: BUILD FAILED - $buildError"
+    exit 2
+}
+if (-not $diagsReady) {
     Write-Output ''
     Write-Output 'RESULT: COMPILER FAILED - no diagnostics log was written. xppc output:'
     Write-Output $consoleText.Trim()
@@ -287,7 +421,6 @@ if (-not (Test-Path -LiteralPath $xmlLog)) {
 }
 
 # ---------------------------------------------------------------- diagnostics
-[xml]$log = [System.IO.File]::ReadAllText($xmlLog)
 $segmentCache = @{}
 function Get-ElementFile([string]$AxType, [string]$Name) {
     foreach ($m in @($info.Model) + @($info.Models | Where-Object { $_ -ne $info.Model })) {
@@ -410,6 +543,13 @@ if ($p.ExitCode -ne 0) {
         Write-Output "RESULT: FAILED - xppc exit code $($p.ExitCode) without error diagnostics. xppc output:"
         Write-Output $consoleText.Trim()
     }
+    exit 1
+}
+if ($deployProblems.Count -gt 0) {
+    Write-Output "DEPLOY PROBLEMS ($($deployProblems.Count))"
+    $deployProblems | ForEach-Object { Write-Output "  $_" }
+    Write-Output ''
+    Write-Output "RESULT: FAILED - compiled, but the label compile or DB sync failed; $summary"
     exit 1
 }
 if ($missingLabels -gt 0 -or $ignoredCount -gt 0) {

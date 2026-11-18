@@ -23,9 +23,9 @@ In older versions, add the marketplace first:
 
 Before Claude creates or changes X++ elements (classes, tables, forms, extensions, EDTs, enums, menu items, data entities, security objects, labels), the skill makes it set up the task: the task's own Visual Studio project and, when the code is in git, its own branch, both named by your project's rules (CLAUDE.md, or the pattern of the existing projects and branches). Claude doesn't switch branches over uncommitted changes, and never commits or pushes unless you ask. After the changes, the skill makes Claude:
 
-1. Add the changed elements to the task's Visual Studio project (`.rnrproj`), the way Visual Studio does. It also normalizes the element XML to the Visual Studio file format (UTF-8 without BOM, CRLF, no newline at end of file), so git diffs stay clean.
-2. Compile the project with the X++ compiler, `xppc.exe`. Visual Studio's *Build project* can't run from the command line, and X++ compiles a whole package anyway, so the skill compiles the package the project's model belongs to. The output goes to a scratch folder.
-3. Analyse the result: every error, marked `[project]` or `[other]`, warnings for the project's elements only, and the exact XML file line and source text for each code error. Claude fixes the errors and compiles again, then runs a full compile before handing the work back.
+1. Add the changed elements to the task's Visual Studio project (`.rnrproj`), the way Visual Studio does, and remove deleted ones. It also normalizes the element XML and the project file to the Visual Studio file format (UTF-8 without BOM, CRLF, no newline at end of file), so git diffs stay clean.
+2. Build the project the way a Visual Studio build does on a CHE or VHD development VM, where X++ is built into the running environment. Visual Studio's *Build project* can't run from the command line, and X++ compiles a whole package anyway, so the skill builds the package the project's model belongs to: it stops the AOS (IIS) and the batch service, compiles the package with `xppc.exe` into `PackagesLocalDirectory\<Package>\bin`, compiles the package's labels when they changed, syncs the project's tables, views and data entities when they changed, and starts IIS and the batch service again, so the change can be tested right away. With `-CheckOnly` it only compiles, into a scratch folder, and leaves the running environment alone.
+3. Analyse the result: every error, marked `[project]` or `[other]`, warnings for the project's elements only, and the exact XML file line and source text for each code error. Claude fixes the errors and builds again, then runs a full build before handing the work back.
 
 Before compiling, it checks every project element file for XML that Visual Studio and the compiler silently ignore: a property out of order, an unknown property name, or a wrong XML namespace. Such an element compiles without error but loses those properties (a menu item without its root namespace loses all of them). The check reads the element classes in the D365FO metadata assembly to know the exact order and namespace of every property.
 
@@ -67,8 +67,9 @@ The project's own conventions (CLAUDE.md, or the existing elements in the model)
 
 ## Requirements
 
-- A Windows D365FO development environment with `<drive>:\AosService\PackagesLocalDirectory\bin\xppc.exe`. The folder is found automatically; override it with `-PackagesDir` or `$env:D365_PACKAGES_DIR`.
+- A Windows D365FO development environment with `<drive>:\AosService\PackagesLocalDirectory\bin\xppc.exe`: a cloud-hosted (CHE) or local (VHD) development VM, where the AOS runs in IIS on the same machine. The folder is found automatically; override it with `-PackagesDir` or `$env:D365_PACKAGES_DIR`.
 - Windows PowerShell 5.1 (included in Windows).
+- For the `d365-xpp-compile` build: an elevated session (run Claude Code as administrator), because the build stops and starts IIS and the batch service, and a Windows account that can change the AOS database (`AxDB` on the local SQL Server by default) for the sync. `-CheckOnly` needs neither.
 - For `d365-xpp-xref`: the `DYNAMICSXREFDB` database on the VM's SQL Server, readable by your Windows account (the default on a development VM). Override the server or database name with `-Server` and `-Database`.
 - For `d365-xpp-trace-parser`: a trace imported into a Trace Parser database on a SQL Server your Windows account can read (usually the local one). The scripts find the database themselves when the server has exactly one; otherwise pass `-Database` (and `-Server`).
 - Claude Code, or Cowork on the same machine, because the skill runs local PowerShell scripts. In claude.ai chat the skill loads, but it can't reach the D365FO machine.
@@ -76,13 +77,17 @@ The project's own conventions (CLAUDE.md, or the existing elements in the model)
 
 ## What the plugin runs and changes
 
-Everything runs locally. The scripts make no internet connections. The only connections are `d365-xpp-xref` and `d365-xpp-trace-parser` opening the local SQL Server (or the server you pass with `-Server`).
+Everything runs locally. The scripts make no internet connections. The only connections are to the local SQL Server (or the server you pass with `-Server` or `-SqlServer`): `d365-xpp-xref` and `d365-xpp-trace-parser` read from it, and the `d365-xpp-compile` build syncs the AOS database through the platform's `SyncEngine.exe`.
 
-- **Runs** `xppc.exe` from `PackagesLocalDirectory\bin`.
+The `d365-xpp-compile` build does what a Visual Studio build does on a CHE or VHD development VM. This is how X++ development works there: the AOS runs the package binaries that the build writes, so the build changes the running environment. With `-CheckOnly`, the skill only compiles into a scratch folder and changes none of this.
+
+- **Runs** `xppc.exe`, `LabelC.exe` and `SyncEngine.exe` from `PackagesLocalDirectory\bin`, and `iisreset.exe`.
+- **Stops and starts** IIS (`iisreset /stop`, `iisreset /start`) and the `DynamicsAxBatch` batch service, around each build. It starts only what was running before. This restarts the AOS.
+- **Writes** the compiled package to `PackagesLocalDirectory\<Package>\bin` and its label resources to `PackagesLocalDirectory\<Package>\Resources`, as Visual Studio does. Logs go to `%TEMP%\xppc-logs\<module>`, the list of label and table files seen at the last label compile and sync to `%TEMP%\xppc-state`, and `-CheckOnly` output to `%TEMP%\xppc-scratch\<module>`.
+- **Changes** the AOS database schema: a partial sync (`SyncEngine.exe -syncmode=partiallist`) of the project's tables, views and data entities, and the elements its extensions extend, when their files changed since the last sync or with `-Sync`. It connects with Windows authentication to `AxDB` on `localhost` (override with `-SqlServer` and `-SqlDatabase`).
 - **Loads** the D365FO metadata assemblies from `PackagesLocalDirectory\bin` into the PowerShell session: `d365-xpp-compile` to check the element XML against the metadata classes, `d365-xpp-conventions` to read the form pattern catalog and form metadata.
-- **Writes** compiler output and logs to `%TEMP%\xppc-scratch\<module>`. The deployed binaries in `PackagesLocalDirectory\<Package>\bin` are never touched.
 - **Updates** the package's `XppMetadata` compiler cache. Visual Studio updates the same cache, and it isn't source-controlled.
-- **Edits** the `.rnrproj` project file named in the command, plus the element XML files Claude passes to `Add-XppProjectItem.ps1` (line-ending and BOM normalization only). With `-Create`, it creates a new `.rnrproj` and `.sln`.
+- **Edits** the `.rnrproj` project file named in the command (items added or, with `-Remove`, removed; CRLF line endings), plus the element XML files Claude passes to `Add-XppProjectItem.ps1` (line-ending and BOM normalization only). With `-Create`, it creates a new `.rnrproj` and `.sln`.
 - **Edits** the form XML file passed to `Invoke-XppFormPattern.ps1 -Apply` (`d365-xpp-conventions`): it sets the properties the form's patterns require and saves the form through the D365FO metadata API, which also refreshes that form's entry in the `XppMetadata` cache. Without `-Apply`, the script only reads.
 - **Reads** the `DYNAMICSXREFDB` cross-reference database with `SELECT` queries only, using Windows authentication (`d365-xpp-xref`). It never writes to the database.
 - **Reads** a Trace Parser database with `SELECT` queries only, using Windows authentication (`d365-xpp-trace-parser`). Without `-Database`, it first lists the databases on the server (`sys.databases` in `master`) to find the one with the Trace Parser tables. It never writes to any database.
@@ -90,14 +95,12 @@ Everything runs locally. The scripts make no internet connections. The only conn
 
 Outside the scripts, `d365-xpp-compile` tells Claude to run `git` in the repository that holds the model: `git status` and `git branch` to check the state, `git fetch` from your configured remote, and `git switch -c` to create and switch to the task's branch when the working tree is clean. It never tells Claude to commit, push or open a pull request; Claude does that only when you ask.
 
-The skill doesn't deploy, sync the database, or restart services. To run or test a change, you still build it in Visual Studio.
-
 ## Privacy
 
-This plugin collects no data. Its scripts run only on your machine. They make no internet connections (only the local SQL Server connection described above), send no telemetry, and send nothing to the plugin author or to any other service. The only network access the skills ask for is `git fetch` from the git remote you already configured, to branch from its current default branch.
+This plugin collects no data. Its scripts run only on your machine. They make no internet connections (only the local SQL Server connections described above), send no telemetry, and send nothing to the plugin author or to any other service. The only network access the skills ask for is `git fetch` from the git remote you already configured, to branch from its current default branch.
 
 - **What the scripts read:** your D365FO source files, Visual Studio project files, compiler logs, the form pattern definitions shipped with the platform, the cross-reference database (element paths, module names, and line numbers), and, for `d365-xpp-trace-parser`, the trace database you imported (method names, SQL statements and the values they bound).
-- **What stays on your machine:** the compile output and logs in `%TEMP%\xppc-scratch`, which you can delete at any time. The trace scripts write no files.
+- **What stays on your machine:** the build logs and state in `%TEMP%\xppc-logs` and `%TEMP%\xppc-state`, and the `-CheckOnly` output in `%TEMP%\xppc-scratch`, which you can delete at any time (without the state, the next build compiles the labels and syncs the project's tables again). The trace scripts write no files.
 - **What Claude sees:** the script output Claude reads in your conversation (file paths, element names, compiler messages, cross-reference results, and trace rows). Claude handles it under your own Claude plan's terms, like anything else in the conversation.
 - **Personal data:** the plugin collects none. A trace can contain business data from your D365FO environment, including user names and the values of records that were processed (customer, order or item data) in its SQL parameter values. The trace scripts print only the rows you ask for, but whatever they print is in your conversation. Capture and analyse traces on environments where that's acceptable.
 

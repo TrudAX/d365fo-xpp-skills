@@ -10,7 +10,11 @@
       * adds <Content Include="AxType\Name"> with the element-type folder link, sorted like Visual
         Studio, plus the <Folder> entry; already-present elements are left alone
     Label files (AxLabelFile) also get their dependent .label.txt item.
-    The project file keeps its formatting; only the new nodes are inserted.
+    The project file keeps its formatting; only the new nodes are inserted. It is saved with CRLF
+    line endings, and a project file with LF line endings is fixed even when nothing is added.
+
+    With -Remove the elements' <Content> items are removed instead (for deleted or renamed elements;
+    the element files don't need to exist).
 
     With -Create a missing project is created (plus a .sln next to its folder), using the same
     layout Visual Studio uses: <root>\<Name>\<Name>.sln and <root>\<Name>\<Name>\<Name>.rnrproj.
@@ -26,9 +30,13 @@
     Create the project if it does not exist. Requires -Model.
 .PARAMETER Model
     Model for a new project (a model name, e.g. ContosoCustomizations - not the package folder name).
+.PARAMETER Remove
+    Remove the elements from the project instead of adding them.
 
 .EXAMPLE
     .\Add-XppProjectItem.ps1 -Project C:\Repos\Contoso\Projects\ABC123_Feature -Element AxClass\ABCFoo, AxTableExtension\SalesTable.ABC
+.EXAMPLE
+    .\Add-XppProjectItem.ps1 -Project C:\Repos\Contoso\Projects\ABC123_Feature -Element AxClass\ABCOldFoo -Remove
 .EXAMPLE
     .\Add-XppProjectItem.ps1 -Project C:\Repos\Contoso\Projects\ABC124_NewFeature\ABC124_NewFeature\ABC124_NewFeature.rnrproj -Create -Model ContosoCustomizations -Element AxClass\ABCFoo
 #>
@@ -41,7 +49,8 @@ param(
     [string]$PackagesDir,
     [switch]$Create,
     [string]$Model,
-    [switch]$NoNormalize
+    [switch]$NoNormalize,
+    [switch]$Remove
 )
 
 $ErrorActionPreference = 'Stop'
@@ -263,13 +272,34 @@ function Add-Folder($Proj, [string]$Folder) {
     Add-SortedChild (Get-ItemGroupFor $Proj 'Folder') $el
 }
 
+# Removes a <Content> item and the whitespace before it. Returns $true when it was there.
+function Remove-ProjectContent($Proj, [string]$Include) {
+    $removed = $false
+    $nodes = @($Proj.Doc.SelectNodes('/m:Project/m:ItemGroup/m:Content', $Proj.Ns) |
+        Where-Object { $_.GetAttribute('Include') -eq $Include })
+    foreach ($n in $nodes) {
+        $parent = $n.ParentNode
+        $prev = $n.PreviousSibling
+        if ($prev -and $prev.NodeType -eq [System.Xml.XmlNodeType]::Whitespace) { [void]$parent.RemoveChild($prev) }
+        [void]$parent.RemoveChild($n)
+        $removed = $true
+    }
+    return $removed
+}
+
+# Saves the project as Visual Studio does: kept formatting, CRLF line endings, the original BOM setting.
 function Save-XppProject($Proj) {
+    $encoding = New-Object System.Text.UTF8Encoding($Proj.HasBom)
     $settings = New-Object System.Xml.XmlWriterSettings
-    $settings.Encoding = New-Object System.Text.UTF8Encoding($Proj.HasBom)
+    $settings.Encoding = $encoding
     $settings.Indent = $false
     $settings.NewLineHandling = [System.Xml.NewLineHandling]::None
-    $writer = [System.Xml.XmlWriter]::Create($Proj.File, $settings)
+    $stream = New-Object System.IO.MemoryStream
+    $writer = [System.Xml.XmlWriter]::Create($stream, $settings)
     try { $Proj.Doc.Save($writer) } finally { $writer.Close() }
+    $text = $encoding.GetString($stream.ToArray()).TrimStart([char]0xFEFF)
+    $text = ($text -replace "`r`n", "`n") -replace "`n", "`r`n"
+    [System.IO.File]::WriteAllText($Proj.File, $text, $encoding)
 }
 
 # ---------------------------------------------------------------- main
@@ -295,6 +325,42 @@ try {
 $specs = @($Element | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $failed = 0
 $changed = $false
+if (-not $NoNormalize -and ((Test-XppFileFormat $projectFile).FormatIssues -contains 'LF line endings')) {
+    $changed = $true
+    Write-Output "fixed   project file : LF line endings"
+}
+if ($Remove) {
+    foreach ($spec in $specs) {
+        $s = $spec
+        if ($s -like '*.xml') { $s = (Split-Path (Split-Path $s) -Leaf) + '\' + [System.IO.Path]::GetFileNameWithoutExtension($s) }
+        if ($s -notmatch '^(Ax[A-Za-z]+)[\\/](.+)$') {
+            Write-Output "error   $spec : expected 'AxType\Name' or a path to the element .xml"
+            $failed++
+            continue
+        }
+        $include = "$($Matches[1])\$($Matches[2])"
+        if (Remove-ProjectContent $proj $include) {
+            $changed = $true
+            Write-Output "removed $include"
+            # A label file's .label.txt items depend on it.
+            $deps = @($proj.Doc.SelectNodes('/m:Project/m:ItemGroup/m:Content', $proj.Ns) |
+                Where-Object { $_.SelectSingleNode('m:DependentUpon', $proj.Ns) -and $_.SelectSingleNode('m:DependentUpon', $proj.Ns).InnerText -eq $include })
+            foreach ($d in $deps) {
+                $depInclude = $d.GetAttribute('Include')
+                [void](Remove-ProjectContent $proj $depInclude)
+                Write-Output "removed $depInclude (label resource of $include)"
+            }
+        } else {
+            Write-Output "absent  $include (not in the project)"
+        }
+    }
+    if ($changed) {
+        Save-XppProject $proj
+        Write-Output "saved   $projectFile"
+    }
+    if ($failed -gt 0) { exit 1 }
+    exit 0
+}
 foreach ($spec in $specs) {
     $type = $null; $name = $null; $file = $null
     if ($spec -like '*.xml' -and (Test-Path -LiteralPath $spec -PathType Leaf)) {
