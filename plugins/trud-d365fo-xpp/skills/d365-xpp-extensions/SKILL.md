@@ -113,7 +113,6 @@ protected void printReport(CustInvoiceJour _custInvoiceJour)    // illustrative 
 - Data entity extension class: `[ExtensionOf(tableStr(<Entity>))]`. View: `viewStr(<View>)`.
 - Functions for `Global` go in the model's existing `Global` extension class. A new one is declared `final static class`.
 - To run the base call without security policies, write `unchecked (Uncheck::XDS) { next …; }`. Don't toggle `XDSServices.setXDSState`.
-- A context class implements `System.IDisposable` with a method named `Dispose`, capital D. `dispose` doesn't compile.
 
 ### Passing a value into standard code
 

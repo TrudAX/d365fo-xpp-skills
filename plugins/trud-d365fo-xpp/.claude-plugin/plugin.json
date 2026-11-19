@@ -1,7 +1,7 @@
 {
   "name": "trud-d365fo-xpp",
   "displayName": "D365FO X++ Development",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Skills for Dynamics 365 Finance and Operations X++ development: create tables, fields, forms, RunBase classes and extensions with consistent conventions and check forms against their patterns, write and review Chain of Command wrappers, event handlers, form extensions and lookups with tested rules and recipes, add changed AOT elements to the Visual Studio project, build the project the way Visual Studio does on a CHE or VHD development VM (xppc, labels, DB sync, AOS restart), analyse the compile errors, find where elements are used and their extension classes from the cross-reference database, and link a Trace Parser trace to the X++ code that wrote each value.",
   "author": {
     "name": "Denis Trunin",
